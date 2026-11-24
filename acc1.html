@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đang chuyển hướng tải file (Acc 1)...</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; }
+    .box { text-align: center; padding: 28px; max-width: 440px; background: #1e293b; border-radius: 14px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); }
+    .spinner { width: 40px; height: 40px; border: 4px solid #334155; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .title { font-size: 18px; font-weight: 700; color: #38bdf8; margin-bottom: 8px; }
+    .desc { font-size: 14px; color: #94a3b8; line-height: 1.5; margin: 0 0 16px 0; }
+    .warn { color: #fbbf24; font-size: 15px; font-weight: 600; line-height: 1.5; }
+    .retry-btn { margin-top: 14px; padding: 10px 20px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-weight: 700; font-size: 14px; cursor: pointer; display: none; }
+    .retry-btn:hover { background: #7dd3fc; }
+    a { color: #38bdf8; font-size: 14px; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div id="spinner" class="spinner"></div>
+    <div class="title" id="boxTitle">Đang xử lý link tải [Acc 1]</div>
+    <p id="status" class="desc">Vui lòng đợi trong giây lát...</p>
+    <button id="retryBtn" class="retry-btn" onclick="retryEntry()">🔄 Thử lại (sau khi đổi IP)</button>
+    <a id="fallback" href="#" style="display:none">Bấm vào đây nếu không tự chuyển trang</a>
+  </div>
+  <script>
+    (function () {
+      var ACC_ID = "1";
+      var SERVER_BASE = window.location.hostname.includes("160-191-50-245")
+        ? window.location.origin
+        : "https://160-191-50-245.sslip.io";
+      var DEFAULT_TARGET = "https://www.mediafire.com/file/n82m7dnuo9t9cmz/VALI+MODS+V96.apks.zip/file";
+
+      var params = new URLSearchParams(window.location.search);
+      var isStart = params.get("s") === "1";
+      var spinner = document.getElementById("spinner");
+      var statusEl = document.getElementById("status");
+      var fallbackEl = document.getElementById("fallback");
+      var retryBtn = document.getElementById("retryBtn");
+
+      function showError(msg) {
+        spinner.style.display = "none";
+        statusEl.className = "warn";
+        statusEl.textContent = "⚠️ " + (msg || "Không thể mở liên kết lúc này.");
+        retryBtn.style.display = "inline-block";
+      }
+
+      function startEntry() {
+        spinner.style.display = "block";
+        statusEl.className = "desc";
+        statusEl.textContent = "Đang kiểm tra và chuẩn bị link tải, vui lòng đợi...";
+        retryBtn.style.display = "none";
+
+        var u = params.get("u") || "";
+        var n = params.get("n") || "";
+        var sig = params.get("sig") || "";
+        var sessionKey = "sk_acc1_" + Date.now() + "_" + Math.random().toString(36).substr(2, 8);
+
+        try {
+          localStorage.setItem("gtraffic_session_acc1", JSON.stringify({
+            sk: sessionKey,
+            acc: ACC_ID,
+            u: u,
+            n: n,
+            sig: sig,
+            ts: Date.now()
+          }));
+        } catch (e) {}
+
+        var q = new URLSearchParams({
+          acc: ACC_ID,
+          mode: "json",
+          u: u,
+          n: n,
+          sig: sig,
+          sk: sessionKey,
+          _t: Date.now()
+        });
+
+        fetch(SERVER_BASE + "/entry?" + q.toString(), { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data && data.ok && data.redirect) {
+              fallbackEl.href = data.redirect;
+              fallbackEl.style.display = "inline";
+              window.location.replace(data.redirect);
+            } else {
+              showError(data && data.message);
+            }
+          })
+          .catch(function () {
+            window.location.replace(SERVER_BASE + "/entry?" + q.toString().replace("mode=json&", ""));
+          });
+      }
+
+      window.retryEntry = startEntry;
+
+      if (isStart) {
+        startEntry();
+      } else {
+        var to = params.get("to") || DEFAULT_TARGET;
+        if (!/^https?:\/\//i.test(to)) to = DEFAULT_TARGET;
+        fallbackEl.href = to;
+        fallbackEl.style.display = "inline";
+        statusEl.textContent = "Đang hoàn tất và chuyển tới trang tải file...";
+
+        var navigated = false;
+        function proceed() {
+          if (navigated) return;
+          navigated = true;
+          window.location.replace(to);
+        }
+
+        var savedSession = null;
+        try {
+          savedSession = JSON.parse(localStorage.getItem("gtraffic_session_acc1") || "null");
+        } catch (e) {}
+
+        var goParams = new URLSearchParams({
+          acc: ACC_ID,
+          mode: "json"
+        });
+        if (savedSession) {
+          goParams.set("sk", savedSession.sk || "");
+          if (savedSession.u) goParams.set("u", savedSession.u);
+          if (savedSession.n) goParams.set("n", savedSession.n);
+          if (savedSession.sig) goParams.set("sig", savedSession.sig);
+        }
+
+        var goUrl = SERVER_BASE + "/go?" + goParams.toString();
+
+        if (navigator.sendBeacon) {
+          try {
+            navigator.sendBeacon(goUrl);
+          } catch (e) {}
+        }
+
+        fetch(goUrl, { cache: "no-store", keepalive: true })
+          .then(function () { proceed(); })
+          .catch(function () { proceed(); });
+
+        setTimeout(proceed, 1200);
+      }
+    })();
+  </script>
+</body>
+</html>
