@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Đang chuyển hướng tải file...</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; }
+    .box { text-align: center; padding: 24px; max-width: 420px; }
+    .spinner { width: 36px; height: 36px; border: 4px solid #334155; border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 14px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .warn { color: #fbbf24; font-size: 16px; font-weight: 600; line-height: 1.5; }
+    .retry-btn { margin-top: 14px; padding: 10px 18px; border: none; border-radius: 8px; background: #38bdf8; color: #0f172a; font-weight: 700; font-size: 14px; cursor: pointer; display: none; }
+    a { color: #38bdf8; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div id="spinner" class="spinner"></div>
+    <p id="status">Đang chuẩn bị link tải, vui lòng đợi...</p>
+    <button id="retryBtn" class="retry-btn" onclick="retryEntry()">🔄 Thử lại (sau khi đổi IP)</button>
+    <a id="fallback" href="#" style="display:none">Bấm vào đây nếu không tự chuyển trang</a>
+  </div>
+  <script>
+    (function () {
+      var SERVER_BASE = window.location.hostname.includes("160-191-50-245")
+        ? window.location.origin
+        : "https://160-191-50-245.sslip.io";
+      var DEFAULT_TARGET = "https://www.mediafire.com/file/n82m7dnuo9t9cmz/VALI+MODS+V96.apks.zip/file";
+
+      var params = new URLSearchParams(window.location.search);
+      var ACC_ID = params.get("acc") || "2";
+      var isStart = params.get("s") === "1";
+      var spinner = document.getElementById("spinner");
+      var statusEl = document.getElementById("status");
+      var fallbackEl = document.getElementById("fallback");
+      var retryBtn = document.getElementById("retryBtn");
+
+      function showError(msg) {
+        spinner.style.display = "none";
+        statusEl.className = "warn";
+        statusEl.textContent = "⚠️ " + (msg || "Không thể mở liên kết lúc này.");
+        retryBtn.style.display = "inline-block";
+      }
+
+      function startEntry() {
+        spinner.style.display = "block";
+        statusEl.className = "";
+        statusEl.textContent = "Đang chuẩn bị link tải, vui lòng đợi...";
+        retryBtn.style.display = "none";
+
+        var u = params.get("u") || "";
+        var n = params.get("n") || "";
+        var sig = params.get("sig") || "";
+        var sessionKey = "sk_acc" + ACC_ID + "_" + Date.now() + "_" + Math.random().toString(36).substr(2, 8);
+
+        // Lưu session vào localStorage để nhận diện người làm kể cả khi xoay IP
+        try {
+          if (u && sig) {
+            localStorage.setItem("gtraffic_session_acc" + ACC_ID, JSON.stringify({
+              sk: sessionKey,
+              acc: ACC_ID,
+              u: u,
+              n: n,
+              sig: sig,
+              ts: Date.now()
+            }));
+          }
+        } catch (e) {}
+
+        var q = new URLSearchParams({
+          acc: ACC_ID,
+          mode: "json",
+          u: u,
+          n: n,
+          sig: sig,
+          sk: sessionKey,
+          _t: Date.now()
+        });
+
+        fetch(SERVER_BASE + "/entry?" + q.toString(), { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data && data.ok && data.redirect) {
+              fallbackEl.href = data.redirect;
+              fallbackEl.style.display = "inline";
+              window.location.replace(data.redirect);
+            } else {
+              showError(data && data.message);
+            }
+          })
+          .catch(function () {
+            window.location.replace(SERVER_BASE + "/entry?" + q.toString().replace("mode=json&", ""));
+          });
+      }
+
+      window.retryEntry = startEntry;
+
+      if (isStart) {
+        startEntry();
+      } else {
+        var to = params.get("to") || DEFAULT_TARGET;
+        if (!/^https?:\/\//i.test(to)) to = DEFAULT_TARGET;
+        fallbackEl.href = to;
+        fallbackEl.style.display = "inline";
+        statusEl.textContent = "Đang xác nhận lượt tải và chuyển hướng...";
+
+        var navigated = false;
+        function proceed() {
+          if (navigated) return;
+          navigated = true;
+          window.location.replace(to);
+        }
+
+        // Lấy thông tin Session Key đã lưu từ localStorage
+        var savedSession = null;
+        try {
+          savedSession = JSON.parse(localStorage.getItem("gtraffic_session_acc" + ACC_ID) || "null");
+        } catch (e) {}
+
+        var goParams = new URLSearchParams({
+          acc: ACC_ID,
+          mode: "json"
+        });
+        if (savedSession && savedSession.u && savedSession.sig) {
+          goParams.set("sk", savedSession.sk || "");
+          goParams.set("u", savedSession.u);
+          goParams.set("n", savedSession.n || "");
+          goParams.set("sig", savedSession.sig);
+        }
+
+        var goUrl = SERVER_BASE + "/go?" + goParams.toString();
+
+        // 1. sendBeacon đảm bảo gửi ngầm đáng tin cậy kể cả khi rời trang
+        if (navigator.sendBeacon) {
+          try {
+            navigator.sendBeacon(goUrl);
+          } catch (e) {}
+        }
+
+        // 2. Đợi Railway/VPS ghi nhận /go rồi mới chuyển sang Mediafire
+        fetch(goUrl, { cache: "no-store", keepalive: true })
+          .then(function () { proceed(); })
+          .catch(function () { proceed(); });
+
+        // 3. Fallback tối đa 1.2s nếu mạng chập chờn để người dùng không bị kẹt
+        setTimeout(proceed, 1200);
+      }
+    })();
+  </script>
+</body>
+</html>
